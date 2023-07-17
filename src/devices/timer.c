@@ -30,6 +30,9 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
+struct list sleeping_list;
+bool cmp_alarm_wakeup (const struct list_elem* lhs, const struct list_elem* rhs, void* aux UNUSED);
+
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -92,8 +95,22 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  
+  /* Inturrupt state -> Disable, return status*/
+  enum intr_level old = intr_disable();
+  
+  /* Set current thread status wakeup time*/
+  thread_current()->wakeup = start + ticks;
+
+  list_insert_ordered ( /* Insert to alarm_list this thread, ordering the time*/
+    &sleeping_list,
+    &thread_current()->elem,
+    cmp_alarm_wakeup,
+    NULL
+  );
+
+  thread_block ();      /* Set this thread state to THREAD_BLOCK to sleep*/
+  intr_set_level (old); /* Restore the previous inturrupt level*/
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -170,8 +187,24 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+  struct thread* sleep_front;
+
   ticks++;
   thread_tick ();
+
+  while (!list_empty(&sleeping_list))
+  {
+    sleep_front = list_entry (list_front(&sleeping_list), struct thread, elem);
+    if (sleep_front->wakeup <= ticks)
+    {
+      list_pop_front(&sleeping_list);
+      thread_unblock(sleep_front);
+    }
+    else
+    {
+      break;
+    }
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -243,4 +276,12 @@ real_time_delay (int64_t num, int32_t denom)
      the possibility of overflow. */
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
+}
+
+bool
+cmp_alarm_wakeup (const struct list_elem* lhs, const struct list_elem* rhs, void* aux UNUSED){
+  struct thread *t_lhs = list_entry (lhs, struct thread, elem);
+  struct thread *t_rhs = list_entry (rhs, struct thread, elem);
+
+  return t_lhs->wakeup < t_rhs->wakeup;
 }
