@@ -31,7 +31,7 @@ static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
 struct list sleeping_list;
-bool cmp_alarm_wakeup (const struct list_elem* lhs, const struct list_elem* rhs, void* aux UNUSED);
+bool compare_alarm_wakeup (const struct list_elem* lhs, const struct list_elem* rhs);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -105,7 +105,7 @@ timer_sleep (int64_t ticks)
   list_insert_ordered ( /* Insert to alarm_list this thread, ordering the time*/
     &sleeping_list,
     &thread_current()->elem,
-    cmp_alarm_wakeup,
+    compare_alarm_wakeup,
     NULL
   );
 
@@ -279,7 +279,7 @@ real_time_delay (int64_t num, int32_t denom)
 }
 
 bool
-cmp_alarm_wakeup (const struct list_elem* lhs, const struct list_elem* rhs, void* aux UNUSED){
+compare_alarm_wakeup (const struct list_elem* lhs, const struct list_elem* rhs){
   struct thread *t_lhs = list_entry (lhs, struct thread, elem);
   struct thread *t_rhs = list_entry (rhs, struct thread, elem);
 
