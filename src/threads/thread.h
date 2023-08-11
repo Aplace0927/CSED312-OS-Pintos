@@ -99,8 +99,17 @@ struct thread
 #endif
 
     /* Owned by thread.c. */
-    unsigned magic;                     /* Detects stack overflow. */
-    uint64_t wakeup;                    /* Wakeup time of thread*/
+    unsigned magic;                     /* Detects stack overflow. */\
+
+    // Add: alarm implementation
+    int64_t wakeup;                    /* Wakeup time of thread*/
+
+    // Add: priority donation
+    int initial_priority;
+    struct lock* wait;
+    struct list donor;
+    struct list_elem donor_elem;
+
   };
 
 /* If false (default), use round-robin scheduler.
@@ -133,6 +142,14 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+
+bool thread_compare_priority(struct list_elem*, struct list_elem*, void *aux UNUSED);
+bool thread_compare_donor_priority(struct list_elem*, struct list_elem*, void *aux UNUSED);
+
+void thread_donate_priority (void);
+void thread_unlock (struct lock* lock);
+
+bool thread_check_preempt (void);
 
 int thread_get_nice (void);
 void thread_set_nice (int);

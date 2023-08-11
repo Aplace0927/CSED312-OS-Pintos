@@ -204,6 +204,11 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
+  
+  if (thread_check_preempt())
+  {
+    thread_yield();
+  }
 
   return tid;
 }
@@ -241,7 +246,9 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  
+  list_insert_ordered(&ready_list, &t->elem, thread_compare_priority, NULL);
+
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -311,8 +318,11 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  if (cur != idle_thread)
+  {
+    list_insert_ordered(&ready_list, &cur->elem, thread_compare_priority, NULL);
+  }
+
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -339,7 +349,20 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  if (thread_mlfqs)
+  {
+    return;
+  }
+  
+  thread_current()->priority = new_priority;
+  thread_current()->initial_priority = new_priority;
+
+  thread_update_priority();
+
+  if (thread_check_preempt())
+  {
+    thread_yield();
+  }
 }
 
 /* Returns the current thread's priority. */
@@ -347,6 +370,91 @@ int
 thread_get_priority (void) 
 {
   return thread_current ()->priority;
+}
+
+bool
+thread_compare_priority (struct list_elem* l_elem, struct list_elem* r_elem, void* aux UNUSED)
+{
+  struct thread* l_thrd = list_entry(l_elem, struct thread, elem);
+  struct thread* r_thrd = list_entry(r_elem, struct thread, elem);
+
+  return l_thrd->priority > r_thrd->priority;
+}
+
+bool
+thread_compare_donor_priority (struct list_elem* l_don_elem, struct list_elem* r_don_elem, void* aux UNUSED)
+{
+  struct thread* l_thrd = list_entry(l_don_elem, struct thread, donor_elem);
+  struct thread* r_thrd = list_entry(r_don_elem, struct thread, donor_elem);
+
+  return l_thrd->priority > r_thrd->priority;
+}
+
+void
+thread_donate_priority (void)
+{
+  struct thread* current_thread = thread_current();
+
+  int donating_thread_priority = current_thread->priority;
+
+  ASSERT(current_thread != NULL);
+  ASSERT(current_thread->wait != NULL);
+  ASSERT(current_thread->wait->holder != NULL);
+
+  struct thread* holding_thread = NULL; //current_thread->wait->holder;
+
+
+  while(current_thread->wait != NULL)
+  {
+    holding_thread = current_thread->wait->holder;
+    holding_thread->priority = donating_thread_priority;
+    current_thread = holding_thread;
+  }
+}
+
+void
+thread_unlock (struct lock* lock)
+{
+  struct thread* current_thread = thread_current();
+
+  for (struct list_elem* elem = list_begin(&current_thread->donor); elem != list_end(&current_thread->donor); elem = list_next(elem))
+  {
+    if (list_entry(elem, struct thread, donor_elem)->wait == lock)
+    {
+      list_remove(&list_entry(elem, struct thread, donor_elem)->donor_elem);
+    }
+  }
+}
+
+void
+thread_update_priority (void)
+{
+  struct thread* current_thread = thread_current();
+  current_thread->priority = current_thread->initial_priority;
+
+  if (list_empty(&current_thread->donor))
+  {
+    return;
+  }
+
+  if (current_thread->priority < list_entry(list_front(&current_thread->donor), struct thread, donor_elem)->priority)
+  {
+    current_thread->priority = list_entry(list_front(&current_thread->donor), struct thread, donor_elem)->priority;
+  }
+}
+
+bool
+thread_check_preempt (void)
+{
+  if (list_empty(&ready_list))
+  {
+    return false;
+  }
+
+  struct thread* current_thread = thread_current();
+  struct thread* front_thread = list_entry(list_front(&ready_list), struct thread, elem);
+
+  return current_thread->priority < front_thread->priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -467,6 +575,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  t->initial_priority = priority;
+  t->wait = NULL;
+  list_init(&t->donor);
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
