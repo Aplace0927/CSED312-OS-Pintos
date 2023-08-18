@@ -192,6 +192,22 @@ timer_interrupt (struct intr_frame *args UNUSED)
   ticks++;
   thread_tick ();
 
+  if (thread_mlfqs)
+  {
+    thread_mlfqs_inc_recent_cpu();
+
+    if (ticks % MLFQS_PRIORITY_UPDATE_FREQ == 0)
+    {
+      thread_foreach(thread_mlfqs_set_priority, NULL);
+    }
+
+    if (ticks % TIMER_FREQ == 0)
+    {
+      thread_foreach(thread_mlfqs_set_recent_cpu, NULL);
+      thread_mlfqs_update_load_avg();
+    }
+  }
+  
   while (!list_empty(&sleeping_list))
   {
     sleep_front = list_entry (list_front(&sleeping_list), struct thread, elem);

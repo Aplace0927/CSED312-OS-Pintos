@@ -11,6 +11,8 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/fp_arithmetic.h"
+
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -61,6 +63,9 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
+
+/* Systemwide load-avg value in MLFQS scheduler*/
+fp_t mlfqs_load_average;
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -113,6 +118,8 @@ thread_start (void)
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
   thread_create ("idle", PRI_MIN, idle, &idle_started);
+
+  mlfqs_load_average = MLFQS_LOAD_AVG_DEFAULT;
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
@@ -349,7 +356,7 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  if (thread_mlfqs)
+  if (thread_mlfqs == true)
   {
     return;
   }
@@ -457,35 +464,136 @@ thread_check_preempt (void)
   return current_thread->priority < front_thread->priority;
 }
 
+void
+thread_mlfqs_set_priority (struct thread* thrd)
+{
+  ASSERT (thread_mlfqs == true);
+
+  if (thrd != idle_thread)
+  {
+    /* (RECENT_CPU / 4) + (NICE * 2) */
+    fp_t mlfqs_priority;
+    mlfqs_priority = fixedpoint_add(fixedpoint_div(thrd->mlfqs_recent_cpu, 4 << F), fixedpoint_mul(thrd->mlfqs_nice << F, 2 << F));
+    
+    /* (PRI_MAX) - (_)*/
+    mlfqs_priority = fixedpoint_sub(integer_to_fixedpoint(PRI_MAX), mlfqs_priority);
+
+    /* Set to integer */
+    mlfqs_priority = fixedpoint_to_integer(mlfqs_priority);
+
+    /* Trim the limit */
+    thrd->priority = mlfqs_priority < PRI_MIN ? PRI_MIN : (mlfqs_priority > PRI_MAX ? PRI_MAX : mlfqs_priority);
+  }
+}
+
+void
+thread_mlfqs_set_recent_cpu (struct thread* thrd)
+{
+  ASSERT (thread_mlfqs == true);
+
+  if (thrd != idle_thread)
+  {
+    fp_t mlfqs_recent_cpu;
+
+    /* (LOAD_AVG * 2) / (LOAD_AVG * 2 + 1) */
+    mlfqs_recent_cpu = fixedpoint_div(fixedpoint_mul(mlfqs_load_average, 2 << F), fixedpoint_add(fixedpoint_mul(mlfqs_load_average, 2 << F), 1 << F));
+    
+    /* RECENT_CPU * (_) */
+    mlfqs_recent_cpu = fixedpoint_mul(mlfqs_recent_cpu, thrd->mlfqs_recent_cpu);
+    
+    /* NICE + (_) */
+    mlfqs_recent_cpu = fixedpoint_add(mlfqs_recent_cpu, thrd->mlfqs_nice << F);
+
+    thrd->mlfqs_recent_cpu = mlfqs_recent_cpu;
+  }
+}
+
+void
+thread_mlfqs_inc_recent_cpu (void)
+{
+  ASSERT (thread_mlfqs == true);
+
+  struct thread* current_thread = thread_current();
+
+  if (current_thread != idle_thread)
+  {
+    current_thread->mlfqs_recent_cpu = fixedpoint_add(current_thread->mlfqs_recent_cpu, 1 << F);
+  }
+}
+
+void
+thread_mlfqs_update_load_avg (void)
+{
+  ASSERT (thread_mlfqs == true);
+
+  struct thread* current_thread = thread_current();
+  int thread_readied = list_size(&ready_list) + (int)(current_thread != idle_thread);
+
+  mlfqs_load_average = fixedpoint_add(fixedpoint_mul(mlfqs_load_average, FIFTYNINE_SIXTIETH), fixedpoint_mul(thread_readied << F, ONE_SIXTIETH));
+}
+
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice) 
 {
-  /* Not yet implemented. */
+  ASSERT (thread_mlfqs == true);
+
+  enum intr_level old_level = intr_disable();
+  struct thread* current_thread = thread_current();
+
+  current_thread->mlfqs_nice = nice;
+  
+  thread_mlfqs_set_priority(current_thread);
+  thread_check_preempt();
+
+  intr_set_level(old_level);
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  ASSERT (thread_mlfqs == true);
+
+  enum intr_level old_level = intr_disable();
+  struct thread* current_thread = thread_current();
+  
+  int mlfqs_nice = current_thread->mlfqs_nice;
+
+  intr_set_level(old_level);
+
+  return mlfqs_nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  ASSERT (thread_mlfqs == true);
+
+  enum intr_level old_level = intr_disable();
+  
+  int mlfqs_load_avg = fixedpoint_round_integer(fixedpoint_mul(mlfqs_load_average, 100 << F));
+
+  intr_set_level(old_level);
+
+  return mlfqs_load_avg;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  ASSERT (thread_mlfqs == true);
+
+  enum intr_level old_level = intr_disable();
+  struct thread* current_thread = thread_current();
+  
+  int mlfqs_recent_cpu = fixedpoint_round_integer(fixedpoint_mul(current_thread->mlfqs_recent_cpu, 100 << F));
+
+  intr_set_level(old_level);
+
+  return mlfqs_recent_cpu;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -579,6 +687,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->initial_priority = priority;
   t->wait = NULL;
   list_init(&t->donor);
+
+  t->mlfqs_nice = MLFQS_NICE_DEFAULT;
+  t->mlfqs_recent_cpu = MLFQS_LOAD_AVG_DEFAULT;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

@@ -5,6 +5,8 @@
 #include <list.h>
 #include <stdint.h>
 
+#include "threads/fp_arithmetic.h"
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -23,6 +25,12 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/* MLFQS constants */
+#define MLFQS_NICE_DEFAULT 0            /* Default of NICE in mlfqs scheduler. */
+#define MLFQS_RECENT_CPU_DEFAULT 0      /* Default of RECENT_CPU in mlfqs scheduler. */
+#define MLFQS_LOAD_AVG_DEFAULT 0        /* Default of LOAD_AVG in mlfqs scheduler. */
+#define MLFQS_PRIORITY_UPDATE_FREQ 4    /* MLFQS scheduler priority update frequency. */
 
 /* A kernel thread or user process.
 
@@ -99,7 +107,7 @@ struct thread
 #endif
 
     /* Owned by thread.c. */
-    unsigned magic;                     /* Detects stack overflow. */\
+    unsigned magic;                     /* Detects stack overflow. */
 
     // Add: alarm implementation
     int64_t wakeup;                    /* Wakeup time of thread*/
@@ -109,6 +117,10 @@ struct thread
     struct lock* wait;
     struct list donor;
     struct list_elem donor_elem;
+
+    // Add: mlfqs scheduler
+    int mlfqs_nice;
+    fp_t mlfqs_recent_cpu;
 
   };
 
@@ -142,6 +154,7 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+void thread_mlfqs_set_priority (struct thread*);
 
 bool thread_compare_priority(struct list_elem*, struct list_elem*, void *aux UNUSED);
 bool thread_compare_donor_priority(struct list_elem*, struct list_elem*, void *aux UNUSED);
@@ -153,7 +166,11 @@ bool thread_check_preempt (void);
 
 int thread_get_nice (void);
 void thread_set_nice (int);
-int thread_get_recent_cpu (void);
-int thread_get_load_avg (void);
 
+int thread_get_recent_cpu (void);
+void thread_mlfqs_set_recent_cpu (struct thread*);
+void thread_mlfqs_inc_recent_cpu (void);
+
+int thread_get_load_avg (void);
+void thread_mlfqs_update_load_avg (void);
 #endif /* threads/thread.h */

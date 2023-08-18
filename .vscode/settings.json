@@ -2,6 +2,7 @@
     "files.associations": {
         "*.inc": "c",
         "thread": "c",
-        "stdint.h": "c"
+        "stdint.h": "c",
+        "fp_arithmetic.h": "c"
     }
 }
