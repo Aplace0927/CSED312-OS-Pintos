@@ -3,6 +3,12 @@
         "*.inc": "c",
         "thread": "c",
         "stdint.h": "c",
-        "fp_arithmetic.h": "c"
+        "fp_arithmetic.h": "c",
+        "process.h": "c",
+        "inttypes.h": "c",
+        "thread.h": "c",
+        "limits.h": "c",
+        "stdio.h": "c",
+        "syscall.h": "c"
     }
 }

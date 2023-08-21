@@ -50,21 +50,30 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
-  char *file_name = file_name_;
+  const char *command_input = file_name_;
   struct intr_frame if_;
   bool success;
+
+  char userprog_filename[USERPROG_CMD_MAX_LEN];
+  userprog_parse_filename(command_input, userprog_filename);
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (userprog_filename, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
+  if (success)
+  {
+    userprog_intrframe_push_stack(command_input, &if_.esp);
+    palloc_free_page (command_input);
+  }
+  else
+  {
+    palloc_free_page (command_input);
     thread_exit ();
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -88,6 +97,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  for(long long i = 0; i < 0xDEADBEEF; i++);
   return -1;
 }
 
@@ -462,4 +472,88 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+
+/* Parse a filename from user input command line. */
+void
+userprog_parse_filename(const char* src, char* dst)
+{
+  size_t cut = strcspn(src, " ");
+  strlcpy(dst, src, cut + 1);
+  dst[cut + 1] = '\0';
+}
+
+
+void
+userprog_intrframe_push_stack(const char* cmd, void** sp)
+{
+  size_t argc = 0;
+  char** argv = NULL;
+
+  /* Determine argument count. */
+  char argc_tokenize[USERPROG_CMD_MAX_LEN];
+  strlcpy(argc_tokenize, cmd, strlen(cmd) + 1);
+  
+  char* save = NULL;
+  char* tokenized = NULL;
+
+  do
+  {
+    tokenized = strtok_r(argc ? NULL : argc_tokenize, " ", &save);
+    argc += (int) (tokenized != NULL);
+  } while(tokenized != NULL);
+
+  /* Allocate argument variables memory. */
+  argv = (char**) malloc(sizeof(char*) * argc);
+  ASSERT(argv != NULL); // Check properly allocated.
+
+  /* Save argument variables into memory. */
+  strlcpy(argc_tokenize, cmd, strlen(cmd) + 1);
+  for (int arg = 0; arg < argc; arg++)
+  {
+    tokenized = strtok_r(arg ? NULL : argc_tokenize, " ", &save);
+    argv[arg] = tokenized;
+  }
+
+  /* Push argv entry values: last argv -> first argv */
+  size_t argv_length = 0;
+  size_t args_length = 0;
+  for (int arg = argc - 1; arg >= 0; arg--)
+  {
+    argv_length = strlen(argv[arg]) + 1;
+    args_length += argv_length;
+
+    *sp -= argv_length;
+    strlcpy(*sp, argv[arg], argv_length);
+    argv[arg] = *sp;
+  }
+
+  /* Word align */
+  size_t align_offset[ADDR_SIZE] = {0, 3, 2, 1};
+  *sp -= align_offset[argv_length % ADDR_SIZE];
+
+  /* Push NULL*/
+  *sp -= ADDR_SIZE;
+  **(addr_t**)sp = (addr_t) NULL;
+
+  /* Push argv entry addresses: last argv -> first argv */
+  for (int arg = argc - 1; arg >= 0; arg--)
+  {
+    *sp -= ADDR_SIZE;
+    **(addr_t**)sp = argv[arg];
+  }
+  free(argv); // DO NOT FORGET FREEING MEMORY
+
+  /* Push argv address */
+  *sp -= ADDR_SIZE;
+  **(addr_t**)sp = *sp + ADDR_SIZE;
+
+  /* Push argc */
+  *sp -= ADDR_SIZE;
+  **(addr_t**)sp = argc;
+
+  /* Push formal return address */
+  *sp -= ADDR_SIZE;
+  **(addr_t**)sp = (addr_t) NULL;
 }
