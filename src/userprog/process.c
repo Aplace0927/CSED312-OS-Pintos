@@ -518,11 +518,11 @@ userprog_intrframe_push_stack(const char* cmd, void** sp)
 
   /* Push argv entry values: last argv -> first argv */
   size_t argv_length = 0;
-  size_t args_length = 0;
+  size_t total_argv_length = 0;
   for (int arg = argc - 1; arg >= 0; arg--)
   {
     argv_length = strlen(argv[arg]) + 1;
-    args_length += argv_length;
+    total_argv_length += argv_length;
 
     *sp -= argv_length;
     strlcpy(*sp, argv[arg], argv_length);
@@ -531,7 +531,7 @@ userprog_intrframe_push_stack(const char* cmd, void** sp)
 
   /* Word align */
   size_t align_offset[ADDR_SIZE] = {0, 3, 2, 1};
-  *sp -= align_offset[argv_length % ADDR_SIZE];
+  *sp -= align_offset[total_argv_length % ADDR_SIZE];
 
   /* Push NULL*/
   *sp -= ADDR_SIZE;

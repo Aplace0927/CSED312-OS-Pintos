@@ -122,6 +122,9 @@ struct thread
     int mlfqs_nice;
     fp_t mlfqs_recent_cpu;
 
+    // Add: userprog exit code
+    int exit_code;
+
   };
 
 /* If false (default), use round-robin scheduler.
