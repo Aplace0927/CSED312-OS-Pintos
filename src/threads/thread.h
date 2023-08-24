@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "threads/fp_arithmetic.h"
+#include "threads/vaddr.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -31,6 +32,15 @@ typedef int tid_t;
 #define MLFQS_RECENT_CPU_DEFAULT 0      /* Default of RECENT_CPU in mlfqs scheduler. */
 #define MLFQS_LOAD_AVG_DEFAULT 0        /* Default of LOAD_AVG in mlfqs scheduler. */
 #define MLFQS_PRIORITY_UPDATE_FREQ 4    /* MLFQS scheduler priority update frequency. */
+
+/* File descriptors */
+#define FILE_DESCRIPTOR_STDIN 0
+#define FILE_DESCRIPTOR_STDOUT 1
+// #define FILE_DESCRIPTOR_STDERR 2
+
+#define FILE_DESCRIPTOR_PAGES 4
+#define FILE_DESCRIPTOR_LIMIT ((PGSIZE) / (sizeof(struct file**)))
+#define FILE_DESCRIPTOR_FAILED -1
 
 /* A kernel thread or user process.
 
@@ -122,8 +132,12 @@ struct thread
     int mlfqs_nice;
     fp_t mlfqs_recent_cpu;
 
-    // Add: userprog exit code
+    // Add: userprog
     int exit_code;
+
+    // Add: userprog, file related system call
+    struct file** file_descriptor_table;
+    int file_descriptor_index;
 
   };
 

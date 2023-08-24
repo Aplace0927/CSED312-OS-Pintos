@@ -194,6 +194,20 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+  /* Initialize file descriptor table. */
+  t->file_descriptor_table = palloc_get_multiple (PAL_ZERO, FILE_DESCRIPTOR_PAGES);
+  if (t->file_descriptor_table == NULL)
+    return TID_ERROR;
+
+  t->file_descriptor_table[FILE_DESCRIPTOR_STDIN] = (struct file**) 0xFDFD0000;  // STDIN
+  t->file_descriptor_table[FILE_DESCRIPTOR_STDOUT] = (struct file**) 0xFDFD0001;  // STDOUT
+  t->file_descriptor_index = 2;
+
+#ifdef FILE_DESCRIPTOR_STDERR
+  t->file_descriptor_table[FILE_DESCRIPTOR_STDERR] = (struct file**) 0xFDFD0002;  // STDERR
+  t->file_descriptor_index = 3;
+#endif
+
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
