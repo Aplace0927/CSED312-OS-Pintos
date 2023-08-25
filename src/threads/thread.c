@@ -708,6 +708,14 @@ init_thread (struct thread *t, const char *name, int priority)
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
+
+  struct thread* running_thrd = running_thread();
+  t->parent_thread = running_thrd;
+  list_init(&t->child_list);
+  list_push_back(&running_thrd->child_list, &t->child_elem);
+  
+  sema_init(&t->semaphore_running, 0);
+  sema_init(&t->semaphore_exited, 0);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include "devices/shutdown.h"
+#include "devices/kbd.h"
+#include "devices/input.h"
 
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -15,7 +17,7 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 
-#define USERPROG_SYSCALL_DEBUG
+//#define USERPROG_SYSCALL_DEBUG
 
 static void syscall_handler (struct intr_frame *);
 
@@ -23,6 +25,7 @@ void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+  lock_init(&lock_file_io);
 }
 
 static void
@@ -124,10 +127,9 @@ syscall_handle_exit (void* esp, struct intr_frame* f UNUSED)
 #endif
 
   printf("%s: exit(%d)\n", current_thread->name, current_thread->exit_code);
-  palloc_free_multiple(current_thread->file_descriptor_table, FILE_DESCRIPTOR_PAGES);
+  //palloc_free_multiple(current_thread->file_descriptor_table, FILE_DESCRIPTOR_PAGES);
 
   thread_exit();
-  NOT_REACHED();
 }
 
 void
@@ -206,7 +208,7 @@ syscall_handle_open (void* esp, struct intr_frame* f)
   struct thread* current_thread = thread_current();
 
   /* Add to file descriptor table */
-  int open_descriptor = file_add_table(current_thread, open_file);
+  int open_descriptor = file_add_descriptor_table(current_thread, open_file);
   if (open_descriptor == FILE_DESCRIPTOR_FAILED)
   {
     file_close(open_file);
@@ -242,7 +244,50 @@ syscall_handle_read (void* esp, struct intr_frame* f)
   /* Validate referencing arguments */
   validate_user_address(read_buffer);
 
-  // Not yet
+  struct thread* current_thread = thread_current();
+
+  /* Cannot read from preserved unavailable streams: STDOUT, (STDERR)*/
+#ifdef FILE_DESCRIPTOR_STDERR
+  if (read_descriptor == FILE_DESCRIPTOR_STDOUT || 
+      read_descriptor == FILE_DESCRIPTOR_STDERR ||
+      read_descriptor > FILE_DESCRIPTOR_LIMIT   ||
+      current_thread->file_descriptor_table[read_descriptor] == NULL)
+  {
+    f->eax = (int32_t) -1;
+    return;
+  }
+#else
+  if (read_descriptor == FILE_DESCRIPTOR_STDOUT ||
+      read_descriptor > FILE_DESCRIPTOR_LIMIT   ||
+      current_thread->file_descriptor_table[read_descriptor] == NULL)
+  {
+    f->eax = (int32_t) -1;
+    return;
+  }
+#endif
+
+  lock_acquire(&lock_file_io);  // Prevent race condition during read
+
+  if (read_descriptor == FILE_DESCRIPTOR_STDIN)
+  {
+    size_t offset = 0;
+    for (offset = 0; offset < read_size; offset++)
+    {
+      *((unsigned char*) read_buffer + offset) = input_getc();
+      if (*((unsigned char*) read_buffer + offset) == '\0')
+      {
+        break;
+      }
+    }
+    f->eax = offset;
+    return;
+  }
+  else
+  {
+    f->eax = file_read(current_thread->file_descriptor_table[read_descriptor], read_buffer, read_size);
+  }
+
+  lock_release(&lock_file_io);  // Release lock after read
 
 #ifdef USERPROG_SYSCALL_DEBUG
   printf("Read([%d] [%p] [%u]) -> <%u>\n", read_descriptor, read_buffer, read_size, f->eax);
@@ -260,8 +305,41 @@ syscall_handle_write (void* esp, struct intr_frame* f)
   /* Validate referencing arguments */
   validate_user_address(write_buffer);
 
-  // Not yet
+  struct thread* current_thread = thread_current();
 
+  /* Cannot write to preserved unavailable streams: STDIN, (STDERR)*/
+#ifdef FILE_DESCRIPTOR_STDERR
+  if (write_descriptor == FILE_DESCRIPTOR_STDIN   ||
+      write_descriptor == FILE_DESCRIPTOR_STDERR  ||
+      write_descriptor > FILE_DESCRIPTOR_LIMIT    ||
+      current_thread->file_descriptor_table[write_descriptor] == NULL)
+  {
+    f->eax = (int32_t) -1;
+    return;
+  }
+#else
+  if (write_descriptor == FILE_DESCRIPTOR_STDIN   ||
+      write_descriptor > FILE_DESCRIPTOR_LIMIT    ||
+      current_thread->file_descriptor_table[write_descriptor] == NULL)
+  {
+    f->eax = (int32_t) -1;
+    return;
+  }
+#endif
+
+  lock_acquire(&lock_file_io);  // Prevent race condition during write
+
+  if (write_descriptor == FILE_DESCRIPTOR_STDOUT)
+  {
+    putbuf((char*) write_buffer, write_size);
+    f->eax = write_size;
+  }
+  else
+  {
+    f->eax = file_write(current_thread->file_descriptor_table[write_descriptor], write_buffer, write_size);
+  }
+
+  lock_release(&lock_file_io);  // Release lock after write
 
 #ifdef USERPROG_SYSCALL_DEBUG
   printf("Write([%d] [%p] [%u]) -> <%u>\n", write_descriptor, write_buffer, write_size, f->eax);
@@ -379,7 +457,7 @@ syscall_handle_inumber (void* esp, struct intr_frame* f)
   return;
 }
 
-static struct file*
+struct file*
 file_find_descriptor_table (struct thread* thrd, int descriptor)
 {
 #ifndef FILE_DESCRIPTOR_STDERR

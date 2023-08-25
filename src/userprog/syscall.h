@@ -16,14 +16,19 @@ void syscall_handle_create (void* esp, struct intr_frame*);      // bool (const 
 void syscall_handle_remove (void* esp, struct intr_frame*);      // bool (const char*)
 void syscall_handle_open (void* esp, struct intr_frame*);        // int (const char*)
 void syscall_handle_filesize (void* esp, struct intr_frame*);    // int (int)
+
+struct lock lock_file_io;                                        // Prevent race condition during file IO
 void syscall_handle_read (void* esp, struct intr_frame*);        // int (int, void*, unsigned)
 void syscall_handle_write (void* esp, struct intr_frame*);       // int (int, const void*, unsigned)
+
 void syscall_handle_seek (void* esp, struct intr_frame* UNUSED);        // void (int, unsigned)
 void syscall_handle_tell (void* esp, struct intr_frame*);        // unsigned (int)
 void syscall_handle_close (void* esp, struct intr_frame* UNUSED);       // void (int)
 
+
 void syscall_handle_mmap (void* esp, struct intr_frame*);        // mapid_t (int, void* esp)
 void syscall_handle_munmap (void* esp, struct intr_frame* UNUSED);      // void (mapid_t)
+
 
 void syscall_handle_chdir (void* esp, struct intr_frame*);       // bool (const char*)
 void syscall_handle_mkdir (void* esp, struct intr_frame*);       // bool (const char*)
@@ -31,4 +36,8 @@ void syscall_handle_readdir (void* esp, struct intr_frame*);     // bool (int, c
 void syscall_handle_isdir (void* esp, struct intr_frame*);       // bool (int)
 void syscall_handle_inumber (void* esp, struct intr_frame*);     // int (int)
 
+
+struct file* file_find_descriptor_table (struct thread*, int);
+int file_add_descriptor_table (struct thread*, struct file*);
+void file_delete_descriptor_table (struct thread*, int);
 #endif /* userprog/syscall.h */

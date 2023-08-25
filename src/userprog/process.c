@@ -16,6 +16,7 @@
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
+#include "threads/synch.h"
 #include "threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
@@ -97,26 +98,46 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid) 
 {
-  struct thread* child_thread;
+  struct thread* current_thread = thread_current();
+  struct thread* target_child_thread = NULL;
 
-  if (child_thread == NULL)
+  /* Find child thread from `child_list` */
+  if (!list_empty(&current_thread->child_list))
+  {
+    for (struct list_elem* elem = list_front(&current_thread->child_list); elem != list_end(&current_thread->child_list); elem = list_next(elem))
+    {
+      if (list_entry(elem, struct thread, child_elem)->tid == child_tid)
+      {
+        target_child_thread = list_entry(elem, struct thread, child_elem);
+      }
+    }
+  }
+  
+  if (target_child_thread == NULL)
   {
     return -1;
   }
 
-  //! TODO: Implement semaphore w/ child thread
+  sema_down(&target_child_thread->semaphore_running);   // Wait until child ends running.
+
+  int child_exit_code = target_child_thread->exit_code; // Get exit code of child thread
+
+  list_remove(&target_child_thread->child_elem);        // Remove child thread corpse.
+  sema_up(&target_child_thread->semaphore_exited);      // End occupying child, raise child has dead.
+
+  return child_exit_code;
 }
 
 /* Free the current process's resources. */
 void
 process_exit (void)
 {
-  struct thread *cur = thread_current ();
+  struct thread *current_thread = thread_current ();
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
-  pd = cur->pagedir;
+  pd = current_thread->pagedir;
   if (pd != NULL) 
     {
       /* Correct ordering here is crucial.  We must set
@@ -126,10 +147,30 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
-      cur->pagedir = NULL;
+      current_thread->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  /* Close the files. */
+#ifdef FILE_DESCRIPTOR_STDERR
+  for (int fd = FILE_DESCRIPTOR_STDERR + 1; fd < FILE_DESCRIPTOR_LIMIT; fd++)
+  {
+    file_close(current_thread->file_descriptor_table[fd]);
+  }
+#else
+  for (int fd = FILE_DESCRIPTOR_STDOUT + 1; fd < FILE_DESCRIPTOR_LIMIT; fd++)
+  {
+    file_close(current_thread->file_descriptor_table[fd]);
+  }
+#endif
+
+  /* Free the file descriptor pages. */
+  palloc_free_multiple(current_thread->file_descriptor_table, FILE_DESCRIPTOR_PAGES);
+
+  /* Wait until done. */
+  sema_down(&current_thread->semaphore_exited);
+
 }
 
 /* Sets up the CPU for running user code in the current
