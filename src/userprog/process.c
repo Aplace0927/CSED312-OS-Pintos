@@ -40,9 +40,25 @@ process_execute (const char *file_name)
   strlcpy (fn_copy, file_name, PGSIZE);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+  char userprog_filename[USERPROG_CMD_MAX_LEN];
+  userprog_parse_filename(file_name, userprog_filename);
+
+  if (filesys_open(userprog_filename) == NULL)
+  {
+    return -1;
+  }
+
+  struct thread* current_thread = thread_current();
+
+  /* Loading thread should ordered */
+  tid = thread_create (userprog_filename, PRI_DEFAULT, start_process, fn_copy);
+
+  if (tid == TID_ERROR){
+    palloc_free_page (fn_copy);
+    return;
+  }
+
+  sema_down(&current_thread->semaphore_loaded);
   return tid;
 }
 
@@ -65,14 +81,18 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (userprog_filename, &if_.eip, &if_.esp);
 
+  struct thread* current_thread = thread_current();
+
   if (success)
   {
     userprog_intrframe_push_stack(command_input, &if_.esp);
-    palloc_free_page (command_input);
+    palloc_free_page(command_input);
+    sema_up(&current_thread->parent_thread->semaphore_loaded);
   }
   else
   {
     palloc_free_page (command_input);
+    sema_up(&current_thread->parent_thread->semaphore_loaded);
     thread_exit ();
   }
 
@@ -152,7 +172,7 @@ process_exit (void)
       pagedir_destroy (pd);
     }
 
-  /* Close the files. */
+  /* Close the opened files. */
 #ifdef FILE_DESCRIPTOR_STDERR
   for (int fd = FILE_DESCRIPTOR_STDERR + 1; fd < FILE_DESCRIPTOR_LIMIT; fd++)
   {
@@ -164,13 +184,14 @@ process_exit (void)
     file_close(current_thread->file_descriptor_table[fd]);
   }
 #endif
+  
+  palloc_free_multiple(current_thread->file_descriptor_table, FILE_DESCRIPTOR_PAGES); /* Free the file descriptor pages. */
 
-  /* Free the file descriptor pages. */
-  palloc_free_multiple(current_thread->file_descriptor_table, FILE_DESCRIPTOR_PAGES);
+  /* Close the current ELF. */
+  file_close(current_thread->file_executing);  
 
-  /* Wait until done. */
-  sema_down(&current_thread->semaphore_exited);
-
+  sema_up(&current_thread->semaphore_running);      /* Raise this thread ended! */
+  sema_down(&current_thread->semaphore_exited);     /* Wait until done. */
 }
 
 /* Sets up the CPU for running user code in the current
@@ -368,8 +389,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
   success = true;
 
  done:
-  /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  /* Deny write on executables. */
+  t->file_executing = file;
+  file_deny_write(file);
+
   return success;
 }
 

@@ -713,9 +713,12 @@ init_thread (struct thread *t, const char *name, int priority)
   t->parent_thread = running_thrd;
   list_init(&t->child_list);
   list_push_back(&running_thrd->child_list, &t->child_elem);
-  
+
   sema_init(&t->semaphore_running, 0);
   sema_init(&t->semaphore_exited, 0);
+  sema_init(&t->semaphore_loaded, 0);
+
+  t->file_executing = NULL;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

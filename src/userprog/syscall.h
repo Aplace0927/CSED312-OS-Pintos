@@ -5,7 +5,12 @@
 
 void syscall_init (void);
 
-void validate_user_address (void *addr);
+/* Arguments validating. */
+void validate_user_address (void *addr);                // Validates `type**`
+void validate_argument_address (void *esp, int argc);   // Validates `type*`
+
+/* File and stream related lock. */
+struct lock lock_files;
 
 /* Syscall handler functions. */
 void syscall_handle_halt (void* esp UNUSED, struct intr_frame* UNUSED); // NORETRN void ()
@@ -15,12 +20,9 @@ void syscall_handle_wait (void* esp, struct intr_frame*);        // int (pid_t)
 void syscall_handle_create (void* esp, struct intr_frame*);      // bool (const char*, unsigned)
 void syscall_handle_remove (void* esp, struct intr_frame*);      // bool (const char*)
 void syscall_handle_open (void* esp, struct intr_frame*);        // int (const char*)
-void syscall_handle_filesize (void* esp, struct intr_frame*);    // int (int)
-
-struct lock lock_file_io;                                        // Prevent race condition during file IO
+void syscall_handle_filesize (void* esp, struct intr_frame*);    // int (int)                                        // Prevent race condition during file IO
 void syscall_handle_read (void* esp, struct intr_frame*);        // int (int, void*, unsigned)
 void syscall_handle_write (void* esp, struct intr_frame*);       // int (int, const void*, unsigned)
-
 void syscall_handle_seek (void* esp, struct intr_frame* UNUSED);        // void (int, unsigned)
 void syscall_handle_tell (void* esp, struct intr_frame*);        // unsigned (int)
 void syscall_handle_close (void* esp, struct intr_frame* UNUSED);       // void (int)

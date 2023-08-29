@@ -17,6 +17,7 @@
         "off_t.h": "c",
         "console.h": "c",
         "string.h": "c",
-        "shutdown.h": "c"
+        "shutdown.h": "c",
+        "directory.h": "c"
     }
 }

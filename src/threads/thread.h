@@ -140,13 +140,17 @@ struct thread
     struct file** file_descriptor_table;
     int file_descriptor_index;
 
-    // Add: userprog, child & parent thread management
+    // Add: userprog, child & parent thread management, synchronization
     struct thread* parent_thread;
     struct list_elem child_elem;
     struct list child_list;
 
     struct semaphore semaphore_running;
     struct semaphore semaphore_exited;
+    struct semaphore semaphore_loaded;
+
+    // Add: userprog, deny write on executables
+    struct file* file_executing;
   };
 
 /* If false (default), use round-robin scheduler.
