@@ -39,8 +39,7 @@ typedef int tid_t;
 #define FILE_DESCRIPTOR_STDOUT 1
 // #define FILE_DESCRIPTOR_STDERR 2
 
-#define FILE_DESCRIPTOR_PAGES 4
-#define FILE_DESCRIPTOR_LIMIT ((PGSIZE) / (sizeof(struct file**)))
+#define FILE_DESCRIPTOR_LIMIT 0x80
 #define FILE_DESCRIPTOR_FAILED -1
 
 /* A kernel thread or user process.
@@ -137,7 +136,7 @@ struct thread
     int exit_code;
 
     // Add: userprog, file related system call
-    struct file** file_descriptor_table;
+    struct file* file_descriptor_table[FILE_DESCRIPTOR_LIMIT];
     int file_descriptor_index;
 
     // Add: userprog, child & parent thread management, synchronization

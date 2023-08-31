@@ -187,26 +187,13 @@ thread_create (const char *name, int priority,
 
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
+
   if (t == NULL)
     return TID_ERROR;
 
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-
-  /* Initialize file descriptor table. */
-  t->file_descriptor_table = palloc_get_multiple (PAL_ZERO, FILE_DESCRIPTOR_PAGES);
-  if (t->file_descriptor_table == NULL)
-    return TID_ERROR;
-
-  t->file_descriptor_table[FILE_DESCRIPTOR_STDIN] = (struct file**) 0xFDFD0000;  // STDIN
-  t->file_descriptor_table[FILE_DESCRIPTOR_STDOUT] = (struct file**) 0xFDFD0001;  // STDOUT
-  t->file_descriptor_index = 2;
-
-#ifdef FILE_DESCRIPTOR_STDERR
-  t->file_descriptor_table[FILE_DESCRIPTOR_STDERR] = (struct file**) 0xFDFD0002;  // STDERR
-  t->file_descriptor_index = 3;
-#endif
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -708,6 +695,17 @@ init_thread (struct thread *t, const char *name, int priority)
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
+
+#ifdef FILE_DESCRIPTOR_STDERR
+  t->file_descriptor_table[FILE_DESCRIPTOR_STDIN] = (struct file**) 0xFDFD0000;  // STDIN
+  t->file_descriptor_table[FILE_DESCRIPTOR_STDOUT] = (struct file**) 0xFDFD0001;  // STDOUT
+  t->file_descriptor_table[FILE_DESCRIPTOR_STDERR] = (struct file**) 0xFDFD0002;  // STDERR
+  t->file_descriptor_index = 3;
+#else
+  t->file_descriptor_table[FILE_DESCRIPTOR_STDIN] = (struct file**) 0xFDFD0000;  // STDIN
+  t->file_descriptor_table[FILE_DESCRIPTOR_STDOUT] = (struct file**) 0xFDFD0001;  // STDOUT
+  t->file_descriptor_index = 2;
+#endif
 
   struct thread* running_thrd = running_thread();
   t->parent_thread = running_thrd;
