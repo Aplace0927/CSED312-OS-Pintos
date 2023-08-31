@@ -32,11 +32,16 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
+  struct thread* current_thread = thread_current();
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
+
   if (fn_copy == NULL)
+  {
+    current_thread->exit_code = -1;
     return TID_ERROR;
+  }
   strlcpy (fn_copy, file_name, PGSIZE);
 
   /* Create a new thread to execute FILE_NAME. */
@@ -48,17 +53,26 @@ process_execute (const char *file_name)
     return -1;
   }
 
-  struct thread* current_thread = thread_current();
-
   /* Loading thread should ordered */
   tid = thread_create (userprog_filename, PRI_DEFAULT, start_process, fn_copy);
 
   if (tid == TID_ERROR){
     palloc_free_page (fn_copy);
-    return;
+    return -1;
   }
 
   sema_down(&current_thread->semaphore_loaded);
+
+  struct thread* thread_wait_target = NULL;
+  for(struct list_elem* elem = list_begin(&current_thread->child_list); elem != list_end(&current_thread->child_list); elem = list_next(elem))
+  {
+    thread_wait_target = list_entry(elem, struct thread, child_elem);
+    if (thread_wait_target->exit_code == TID_ERROR)
+    {
+      return process_wait(tid);
+    }
+  }
+
   return tid;
 }
 
@@ -92,8 +106,9 @@ start_process (void *file_name_)
   else
   {
     palloc_free_page (command_input);
+    current_thread->exit_code = -1;
     sema_up(&current_thread->parent_thread->semaphore_loaded);
-    thread_exit ();
+    thread_exit();
   }
 
   /* Start the user process by simulating a return from an
@@ -124,7 +139,7 @@ process_wait (tid_t child_tid)
   /* Find child thread from `child_list` */
   if (!list_empty(&current_thread->child_list))
   {
-    for (struct list_elem* elem = list_front(&current_thread->child_list); elem != list_end(&current_thread->child_list); elem = list_next(elem))
+    for (struct list_elem* elem = list_begin(&current_thread->child_list); elem != list_end(&current_thread->child_list); elem = list_next(elem))
     {
       if (list_entry(elem, struct thread, child_elem)->tid == child_tid)
       {
@@ -132,7 +147,7 @@ process_wait (tid_t child_tid)
       }
     }
   }
-  
+
   if (target_child_thread == NULL)
   {
     return -1;
@@ -185,13 +200,20 @@ process_exit (void)
   }
 #endif
   
-  palloc_free_multiple(current_thread->file_descriptor_table, FILE_DESCRIPTOR_PAGES); /* Free the file descriptor pages. */
-
   /* Close the current ELF. */
   file_close(current_thread->file_executing);  
 
   sema_up(&current_thread->semaphore_running);      /* Raise this thread ended! */
   sema_down(&current_thread->semaphore_exited);     /* Wait until done. */
+  
+  /* Waiting until every child thread die. */
+  struct thread* thread_child_onwait = NULL;
+  
+  for (struct list_elem* elem = list_begin(&current_thread->child_list); elem != list_end(&current_thread->child_list); elem = list_next(elem))
+  {
+    thread_child_onwait = list_entry(elem, struct thread, child_elem);
+    process_wait(thread_child_onwait);
+  }
 }
 
 /* Sets up the CPU for running user code in the current
